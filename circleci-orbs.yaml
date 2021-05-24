@@ -1,0 +1,79 @@
+---
+version: 0.1
+
+commands:
+  ruby-setup:
+    description: Install Bundler and dependencies
+    steps:
+      - run:
+          name: Ruby Version
+          command: |
+            ruby --version
+      - run:
+          name: Install Bundler
+          command: |
+            BUNDLER_VERSION=$(awk '/BUNDLED WITH/ { getline; print $1 }' Gemfile.lock) \
+              && gem install --no-document bundler -v $BUNDLER_VERSION
+      - restore_cache:
+          key: policysvc-ruby-{{ .Branch }}{{ checksum "Gemfile.lock" }}
+      - run:
+          name: Install Bundler dependencies
+          command: |
+            bundle install
+      - save_cache:
+          key: policysvc-ruby-{{ .Branch }}{{ checksum "Gemfile.lock" }}
+          paths:
+            - vendor/bundle
+  semtag:
+    description: Getting SEMTAG
+    steps:
+      - run:
+          name: Getting SEMTAG
+          command: |
+            sudo curl -o /bin/semtag https://raw.githubusercontent.com/pnikosis/semtag/v0.1.0/semtag
+            sudo chmod +x /bin/semtag
+            semtag --version
+  export_tag:
+    description: Export tag for qa or master branches
+    steps:
+      - run:
+          name: Export tag
+          command: >
+            if [ "$CIRCLE_BRANCH" = "master" ]; then
+              export TAG=$(semtag getfinal)
+              echo export LATEST_VERSION=$TAG >> $BASH_ENV
+            elif [ "$CIRCLE_BRANCH" = "qa" ]; then
+              export DATE=$(date "+%Y%m%d%H%M")
+              echo export LATEST_VERSION=$DATE >> $BASH_ENV
+            fi;
+  sentry-org-release:
+    description: Realease a version on Sentry
+    steps:
+      - run:
+          name: Realase a new version on Sentry
+          command: |
+            curl -sL https://sentry.io/get-cli/ | bash
+            export SENTRY_RELEASE=$(echo $LATEST_VERSION)
+            sentry-cli releases new -p $SENTRY_PROJECT $SENTRY_RELEASE
+            sentry-cli releases set-commits --auto $SENTRY_RELEASE
+            sentry-cli releases finalize $SENTRY_RELEASE
+  kubernetes-setup:
+    description: Install kubeconfig
+    steps:
+      - run:
+          name: Install kubeconfig
+          command: |
+            mkdir -p $HOME/.kube
+  helm-setup:
+    description: install helm setup
+    steps:
+      - run:
+          name: Install Helm
+          command: |
+            curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3
+            sudo chmod 700 get_helm.sh
+            sudo ./get_helm.sh "$@"
+      - run:
+          name: Add repo Youse
+          command: |
+            helm repo add youse https://chartmuseum.yousetech.io
